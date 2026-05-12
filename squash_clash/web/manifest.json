@@ -1,0 +1,8 @@
+{
+  "name": "Squash Clash",
+  "short_name": "SquashClash",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0B0F10",
+  "theme_color": "#C6FF3D"
+}

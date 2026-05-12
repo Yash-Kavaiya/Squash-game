@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Squash Clash — Design Exploration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600;700&family=Bebas+Neue&family=Playfair+Display:wght@600;700;800;900&family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0d1012; color: #fff; font-family: 'Inter', system-ui, sans-serif; }
+  body { min-height: 100vh; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail" data-bg-color="#0d1012">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#0d1012"/>
+    <g transform="translate(600 400)">
+      <circle r="180" fill="none" stroke="#C6FF3D" stroke-width="14"/>
+      <circle r="60" fill="#C6FF3D"/>
+      <rect x="-220" y="160" width="440" height="10" rx="5" fill="#C6FF3D"/>
+    </g>
+    <text x="600" y="660" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="44" font-weight="800" letter-spacing="6">SQUASH CLASH</text>
+  </svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="android-frame.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="court.jsx"></script>
+<script type="text/babel" src="game.jsx"></script>
+<script type="text/babel" src="screens.jsx"></script>
+<script type="text/babel">
+// app.jsx — wires everything into a DesignCanvas with iOS + Android frames,
+// plus a Tweaks panel for live customisation.
+
+const { useState, useMemo } = React;
+
+// Phone frame screen sizes (interior content size for the frames)
+const IOS_W = 402, IOS_H = 874;
+const AND_W = 412, AND_H = 892;
+
+// Top/bottom safe-area paddings inside the frames (status bar + home indicator)
+const IOS_TOP = 54, IOS_BOT = 34;
+const AND_TOP = 40, AND_BOT = 24;
+
+function PhoneScreen({ kind, d, children, dark }) {
+  if (kind === 'ios') {
+    return (
+      <IOSDevice width={IOS_W} height={IOS_H} dark={dark}>
+        {children}
+      </IOSDevice>
+    );
+  }
+  return (
+    <AndroidDevice width={AND_W} height={AND_H} dark={dark}>
+      {children}
+    </AndroidDevice>
+  );
+}
+
+// Render a screen function inside a phone frame.
+// We position the screen content absolute-filled inside the frame interior.
+function FramedScreen({ kind, d, render }) {
+  const W = kind === 'ios' ? IOS_W : AND_W;
+  const H = kind === 'ios' ? IOS_H : AND_H;
+  const topPad = kind === 'ios' ? IOS_TOP : AND_TOP;
+  const botPad = kind === 'ios' ? IOS_BOT : AND_BOT;
+  const dark = d.id !== 'court';
+  return (
+    <PhoneScreen kind={kind} d={d} dark={dark}>
+      <div style={{ position: 'absolute', inset: 0, background: d.bg }}>
+        {render({ d, W, H, topPad, botPad })}
+      </div>
+    </PhoneScreen>
+  );
+}
+
+// Compact compare card (no phone frame) for the direction comparison grid
+function DirectionCard({ d, render, height = 580, width = 300 }) {
+  return (
+    <div style={{ width, height, background: d.bg, borderRadius: 24, overflow: 'hidden', border: `1px solid ${d.lineStrong}`, boxShadow: '0 16px 48px rgba(0,0,0,0.4)' }}>
+      {render({ d, W: width, H: height, topPad: 0, botPad: 0 })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tweak defaults
+// ─────────────────────────────────────────────────────────────
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "direction": "pace",
+  "courtView": "iso",
+  "hudLayout": "classic",
+  "difficulty": "pro",
+  "displayFont": "default",
+  "accent": "default"
+}/*EDITMODE-END*/;
+
+function applyTweaks(base, t) {
+  const out = { ...base };
+  // Display font override
+  if (t.displayFont === 'serif') out.fontDisplay = '"Playfair Display", Georgia, serif';
+  else if (t.displayFont === 'condensed') out.fontDisplay = '"Bebas Neue", "Inter", sans-serif';
+  else if (t.displayFont === 'mono') out.fontDisplay = '"Geist Mono", ui-monospace, monospace';
+  else if (t.displayFont === 'grotesk') out.fontDisplay = '"Space Grotesk", system-ui, sans-serif';
+  // Accent override
+  if (t.accent && t.accent !== 'default') {
+    out.primary = t.accent;
+    // Pick a reasonable ink for the chip on accent
+    const isDark = ['#C6FF3D', '#FFD23D', '#5EE6E0'].includes(t.accent);
+    out.primaryInk = isDark ? '#0B1100' : '#FFFFFF';
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const baseD = DIRECTIONS[t.direction] || DIR_PACE;
+  const d = useMemo(() => applyTweaks(baseD, t), [baseD, t.displayFont, t.accent]);
+
+  return (
+    <>
+      <DesignCanvas>
+        <DCSection id="overview" title="01 — Brand directions" subtitle="Three takes on the squash app. Each shown with Home + Game + Post-match. Pick a direction and the rest of the canvas snaps to it via Tweaks.">
+          {Object.values(DIRECTIONS).map((dx) => (
+            <DCArtboard key={dx.id} id={`dir-${dx.id}`} label={`${dx.name.toUpperCase()} · ${dx.tagline}`} width={960} height={620}>
+              <DirectionTriptych d={dx} />
+            </DCArtboard>
+          ))}
+        </DCSection>
+
+        <DCSection id="playable" title="02 — Playable mini-game" subtitle="Drag inside the screen to position your player. Flick up to swing. Court view, difficulty, and HUD layout all swap live from the Tweaks panel.">
+          <DCArtboard id="play-ios" label={`PLAYABLE · iOS · ${t.hudLayout} HUD`} width={IOS_W + 40} height={IOS_H + 40}>
+            <PlayablePhone kind="ios" d={d} t={t} />
+          </DCArtboard>
+          <DCArtboard id="play-android" label={`PLAYABLE · Android · ${t.hudLayout} HUD`} width={AND_W + 40} height={AND_H + 40}>
+            <PlayablePhone kind="android" d={d} t={t} />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="ios-screens" title="03 — iOS · full flow" subtitle="Nine key screens in the chosen direction. Status bar + home indicator preserved.">
+          {SCREEN_LIST.map(([id, label, R]) => (
+            <DCArtboard key={`ios-${id}`} id={`ios-${id}`} label={label} width={IOS_W + 40} height={IOS_H + 40}>
+              <FramedScreen kind="ios" d={d} render={R} />
+            </DCArtboard>
+          ))}
+        </DCSection>
+
+        <DCSection id="android-screens" title="04 — Android · Material 3 chrome" subtitle="The same screens, expressed inside an Android frame with gesture-nav.">
+          {SCREEN_LIST.map(([id, label, R]) => (
+            <DCArtboard key={`and-${id}`} id={`and-${id}`} label={label} width={AND_W + 40} height={AND_H + 40}>
+              <FramedScreen kind="android" d={d} render={R} />
+            </DCArtboard>
+          ))}
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="Direction">
+          <TweakSelect label="Visual direction" value={t.direction} options={[
+            { label: 'Pace — dark + lime', value: 'pace' },
+            { label: 'Stadium — editorial dark', value: 'stadium' },
+            { label: 'Court — warm heritage', value: 'court' },
+          ]} onChange={(v) => setTweak('direction', v)} />
+          <TweakColor label="Accent override" value={t.accent} options={['default', '#C6FF3D', '#FF4D14', '#C8392E', '#5EE6E0', '#FFD23D', '#A855F7']} onChange={(v) => setTweak('accent', v)} />
+          <TweakSelect label="Display font" value={t.displayFont} options={[
+            { label: 'Default (direction)', value: 'default' },
+            { label: 'Inter (sans)', value: 'sans' },
+            { label: 'Bebas Neue (condensed)', value: 'condensed' },
+            { label: 'Playfair Display (serif)', value: 'serif' },
+            { label: 'Space Grotesk', value: 'grotesk' },
+            { label: 'Geist Mono', value: 'mono' },
+          ]} onChange={(v) => setTweak('displayFont', v)} />
+        </TweakSection>
+        <TweakSection label="Game">
+          <TweakRadio label="Court view" value={t.courtView} options={[
+            { label: 'Iso', value: 'iso' }, { label: 'Top', value: 'top' }, { label: 'Side', value: 'side' },
+          ]} onChange={(v) => setTweak('courtView', v)} />
+          <TweakRadio label="HUD layout" value={t.hudLayout} options={[
+            { label: 'Classic', value: 'classic' }, { label: 'Minimal', value: 'minimal' }, { label: 'Broadcast', value: 'broadcast' },
+          ]} onChange={(v) => setTweak('hudLayout', v)} />
+          <TweakRadio label="AI difficulty" value={t.difficulty} options={[
+            { label: 'Easy', value: 'beginner' }, { label: 'Mid', value: 'intermediate' }, { label: 'Pro', value: 'pro' },
+          ]} onChange={(v) => setTweak('difficulty', v)} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+// Direction comparison strip — three mini-screens side by side
+function DirectionTriptych({ d }) {
+  const w = 280, h = 560;
+  return (
+    <div style={{ padding: 20, background: d.id === 'court' ? '#EAE3D0' : '#0a0c0d', borderRadius: 22, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 8px 14px', color: d.id === 'court' ? '#14110D' : '#fff' }}>
+        <div>
+          <div style={{ fontFamily: d.fontMono, fontSize: 11, letterSpacing: 2, opacity: 0.6 }}>DIRECTION</div>
+          <div style={{ fontFamily: d.fontDisplay, fontSize: 24, fontWeight: 800, marginTop: 2 }}>{d.name}</div>
+        </div>
+        <div style={{ fontFamily: d.fontBody, fontSize: 12, opacity: 0.65, maxWidth: 380, textAlign: 'right' }}>{d.tagline}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 12, flex: 1 }}>
+        <DirectionCard d={d} width={w} height={h} render={({d, W, H}) => <ScreenHome d={d} W={W} H={H} />} />
+        <DirectionCard d={d} width={w} height={h} render={({d, W, H}) => <PreviewGame d={d} W={W} H={H} />} />
+        <DirectionCard d={d} width={w} height={h} render={({d, W, H}) => <ScreenPostMatch d={d} W={W} H={H} />} />
+      </div>
+      {/* Token strip */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 8px 0', color: d.id === 'court' ? '#14110D' : '#fff' }}>
+        <Swatch c={d.primary} l="Primary" />
+        <Swatch c={d.bg} l="Bg" border />
+        <Swatch c={d.card} l="Card" border />
+        <Swatch c={d.courtFloor} l="Court" />
+        <Swatch c={d.bad} l="Bad" />
+        <div style={{ flex: 1 }} />
+        <div style={{ fontFamily: d.fontMono, fontSize: 10, opacity: 0.55, letterSpacing: 1.5 }}>{d.fontDisplay.split(',')[0].replace(/"/g, '')}</div>
+      </div>
+    </div>
+  );
+}
+
+function Swatch({ c, l, border }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ width: 14, height: 14, borderRadius: 4, background: c, border: border ? '1px solid rgba(255,255,255,0.15)' : 'none' }} />
+      <span style={{ fontFamily: '"Geist Mono", monospace', fontSize: 10, opacity: 0.6, letterSpacing: 1 }}>{l.toUpperCase()}</span>
+    </div>
+  );
+}
+
+// Static preview of the game screen (no game loop) for direction triptychs
+function PreviewGame({ d, W, H }) {
+  return (
+    <div style={{ width: W, height: H, position: 'relative', background: d.bg, overflow: 'hidden' }}>
+      <CourtView d={d} W={W} H={H} ball={{ x: 0.62, z: 0.65, y: 0.45 }} playerX={0.42} oppX={0.58} />
+      <HUDClassic d={d} score={[7, 4]} gameNum={2} power={0.62} feedback={null} />
+    </div>
+  );
+}
+
+// Playable game wrapped in a phone frame
+function PlayablePhone({ kind, d, t }) {
+  const W = kind === 'ios' ? IOS_W : AND_W;
+  const H = kind === 'ios' ? IOS_H : AND_H;
+  const topPad = kind === 'ios' ? IOS_TOP : AND_TOP;
+  const botPad = kind === 'ios' ? IOS_BOT : AND_BOT;
+  const dark = d.id !== 'court';
+  return (
+    <PhoneScreen kind={kind} d={d} dark={dark}>
+      <div style={{ position: 'absolute', inset: 0, background: d.bg }}>
+        <div style={{ position: 'absolute', top: topPad, left: 0, right: 0, bottom: botPad }}>
+          <PlayableSquash d={d} W={W} H={H - topPad - botPad} courtView={t.courtView} hudLayout={t.hudLayout} difficulty={t.difficulty} />
+        </div>
+      </div>
+    </PhoneScreen>
+  );
+}
+
+// Screen list (id, label, render) — used to fill iOS + Android sections
+const SCREEN_LIST = [
+  ['home', 'Home', (p) => <ScreenHome {...p} />],
+  ['onboarding', 'Onboarding · Step 2', (p) => <ScreenOnboarding {...p} step={2} />],
+  ['game', 'In-Game · Rally', (p) => <PreviewGame d={p.d} W={p.W} H={p.H} />],
+  ['pause', 'Pause overlay', (p) => <ScreenPause {...p} />],
+  ['postmatch', 'Post-match', (p) => <ScreenPostMatch {...p} />],
+  ['stats', 'Stats / History', (p) => <ScreenStats {...p} />],
+  ['practice', 'Practice picker', (p) => <ScreenPractice {...p} />],
+  ['achievements', 'Achievements', (p) => <ScreenAchievements {...p} />],
+  ['settings', 'Settings', (p) => <ScreenSettings {...p} />],
+];
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+</script>
+
+</body>
+</html>
